@@ -1,581 +1,1135 @@
-<?php
-$_SERVER["DOCUMENT_ROOT"] = realpath(dirname(__FILE__) . "/../..");     // скрипт расположен : корень сайта/каталог/подкаталог/скрипт
-// $_SERVER["DOCUMENT_ROOT"] = realpath(dirname(__FILE__) . "/..");     // скрипт расположен : корень сайта/каталог/скрипт
+<?
+define("STOP_STATISTICS", true);
+define('NO_AGENT_CHECK', true);
+define('DisableEventsCheck', true);
+define('BX_SECURITY_SHOW_MESSAGE', true);
+define("PUBLIC_AJAX_MODE", true);
+require($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/include/prolog_before.php");
 
-define("NO_KEEP_STATISTIC", true);
-define("NOT_CHECK_PERMISSIONS", true);
-define('CHK_EVENT', true);
+if (!$GLOBALS['USER']->IsAdmin()) {
+    LocalRedirect(SITE_DIR, true);
+    return;
+}
 
 @set_time_limit(0);
 @ignore_user_abort(true);
 
-
-require($_SERVER["DOCUMENT_ROOT"] . "/bitrix/modules/main/include/prolog_before.php");
-
-if (!CModule::IncludeModule("iblock")) {
-
+if (!CModule::IncludeModule('iblock') || !CModule::IncludeModule('catalog') || !CModule::IncludeModule('sale')) {
+    throw new Exception('Не удалось подключить необходимые модули Битрикса');
     return;
 }
-if (!CModule::IncludeModule("search")) {
+require ($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/sale/handlers/discountpreset/simpleproduct.php");
 
-    return;
-}
+$importYml = new ImportYml([
+    'iblockCode' => 'test',
+    'elementPrefix' => 'Бренд X-',
+    'discountPrefix' => 'Бренд X скидка: ',
+    'translitPrefix' => 'brand-x-id-',
+    'action' => $_GET['action'],
+    'mode' => $_GET['mode'],
+    'ymlFilePath' => $_SERVER['DOCUMENT_ROOT'] . '/local/ymlfile.xml', // импортируемый файл
+    'mappingFilePath' => $_SERVER['DOCUMENT_ROOT'] . '/local/section_mapping.txt',
+    'picturesFilePath' => $_SERVER['DOCUMENT_ROOT'] . '/local/img/[id].jpg',
+    'softDelete' => $_GET['disable_soft_delete'] != 1,
+    'exceptionOnDebug' => $_GET['exception_on_debug'] == 1,
+]);
 
-$file = $_SERVER['DOCUMENT_ROOT'] . '/local/import-yml/yml/marketYandex.yml';  // импортируемый файл
-
-echo '<pre>';
-
-Bitrix\Main\Diag\Debug::startTimeLabel("run");
-
-$instance = ImportYml::getInstance();
-if ($xmlObj = $instance->getXmlToObject($file)) {
-
-    $arCatalogs = $instance->importCatalogs($xmlObj);
-    $items = $instance->importItems($xmlObj, $arCatalogs);
-
-//    $from = realpath(dirname(__FILE__) . "/../../../../..") . "/domatv_image/";
-//    $instance->workWithImages($xmlObj, $from);   // перемещение скаченных файлов в соответствующие каталоги
-
-//    $instance->getPicUrl($xmlObj);     // save to txt-file image url from yaml-file
-//    $instance->showListCatalog($xmlObj);
-
-    echo 'Added catalogs = ' . count($arCatalogs);
-    echo '<br>';
-    echo 'Added items = ' . ($items ?: 0);
-    echo '<br>';
-}
-Bitrix\Main\Diag\Debug::endTimeLabel("run");
-
-var_dump(Bitrix\Main\Diag\Debug::getTimeLabels()['run']['time']);
-
-echo '</pre>';
-
+$importYml->run();
 
 class ImportYml {
-    private static $_instance;
+    protected $iblockCode;
 
-    const CATALOG_ID = '4';                             // id инфоблока каталога (куда импортируем)
-    const PARTNER_PRODUCT_SELECTED_ID = '13';           // id свойства Товар партнера (PARTNER_PRODUCT)
+    protected $allUsersGroupName = 'Все пользователи (в том числе неавторизованные)';
 
-    const PARENT_REPAIR_ID = 'repair';                  // значение доп. поля раздела Для ремонта (UF_YAML_ID)
-    const PARENT_FURNITURE_ID = 'furniture';            // значение доп. поля раздела Мебель (UF_YAML_ID)
-    const PARENT_DACHA_ID = 'tovary-dlya-doma-i-dachi'; // значение доп. поля раздела Дом и дача (UF_YAML_ID)
+    protected $ymlFilePath;
 
-    public $relationArray = [                // yml_id раздела (что добавлять) => bx_id раздела (куда добавлять)
-       '141'  => self::PARENT_DACHA_ID,       // Садовая техника
-       '270'  => self::PARENT_DACHA_ID,       // Оборудование
-       '139'  => self::PARENT_DACHA_ID,       // Для отдыха
-       // '1677' => self::PARENT_FURNITURE_ID,  // Мебель   ( Для жилых комнат )
-       // '344'  => self::PARENT_FURNITURE_ID,  // Интерьер
-       // '1607' => self::PARENT_FURNITURE_ID,  // Для ванной
-       // '1937' => self::PARENT_FURNITURE_ID,  // Мебель для прихожей
-       // '2017' => self::PARENT_FURNITURE_ID,  // Мебель для спальни
-       // '2047' => self::PARENT_FURNITURE_ID,  // Мягкая мебель
-       // '285'  => self::PARENT_FURNITURE_ID,  // Детская мебель
-       // '346'  => self::PARENT_REPAIR_ID,     // Сантехника (И все подкатегории)
-       // '1747' => self::PARENT_REPAIR_ID,     // Двери и конструкции для дома (И все подкатегории)
-       // '905'  => self::PARENT_REPAIR_ID,     // Отделочные материалы (И все подкатегории)
-       // '544'  => self::PARENT_REPAIR_ID,     // Электроинструмент (И все подкатегории)
-       // '633'  => self::PARENT_REPAIR_ID,     // Профессиональный инструмент (И все подкатегории)
-       // '138'  => self::PARENT_REPAIR_ID,     // Ручной инструмент, оборудование (И все подкатегории)
-       // '1807' => self::PARENT_REPAIR_ID,     // Отопление, водоснабжение, вентиляция (И все подкатегории)
-       // '1767' => self::PARENT_REPAIR_ID,     // Строительное оборудование (И все подкатегории)
+    protected $mappingFilePath;
+
+    protected $picturesFilePath;
+
+    protected $sectionSeparator = ' → ';
+
+    protected $mappingSeparator = '=';
+
+    protected $elementPrefix;
+
+    protected $discountPrefix;
+
+    protected $translitPrefix;
+
+    protected $mode = 'debug'; // import - импортировать в инфоблок, debug - вывод отладочной информации без импорта
+
+    protected $softDelete = true;
+
+    protected $exceptionOnDebug = false;
+
+    protected $count = [
+        'elements' => 0,
+        'discounts' => 0,
+        'deleted_elements' => 0,
+        'deleted_discounts' => 0,
     ];
 
-    public $updatePic = false;      // true   - обновлять или нет картинки
-    public $bUpdateSearch = true;   // Индексировать элемент для поиска
-    private $itemsCurrent = null;   // существующие yaml товары
+    protected $existingElements = [];
 
-    private $file;
-    public $urlTxt = "/local/url-pic.txt";
-    // public $from = '/upload/21vek/';        // откуда брать картинки
-    public $to = '/upload/img/galleries/';     // куда класть картинки
+    protected $existingPrices = [];
 
-    private function __construct() {
-        // get yaml items from BX
-        $this->itemsCurrent = [];
-        $arSelect = ['ID', 'NAME', 'IBLOCK_SECTION_ID', 'PROPERTY_YAML_ID'];
-        $arFilter = [
-            "IBLOCK_ID"         => self::CATALOG_ID,
-            "ACTIVE"            => "Y",
-            '!PROPERTY_YAML_ID' => false
-        ];
-        $res = CIBlockElement::GetList([], $arFilter, false, false, $arSelect);
-        while ($arItem = $res->Fetch()) {
-            $this->itemsCurrent[$arItem['PROPERTY_YAML_ID_VALUE']] = $arItem;
+    protected $existingProducts = [];
+
+    protected $existingDiscounts = [];
+
+    protected $catalogGroupBase;
+
+    protected $allUsersGroup;
+
+    protected $xmlObj;
+
+    protected $sectionsMapping = [];
+
+    protected $outputSections = [];
+
+    protected $inputSections = [];
+
+    protected $elementStatus;
+
+    protected $iblock;
+
+    const DEFAULT_ACTION = 'importItems';
+
+    protected $publicVariableNames = [
+        'iblockCode' => ['notEmpty'],
+        'allUsersGroupName' => ['notEmpty'],
+        'ymlFilePath' => ['notEmpty'],
+        'mappingFilePath' => ['notEmpty'],
+        'picturesFilePath' => ['notEmpty'],
+        'sectionSeparator' => ['notEmpty'],
+        'mappingSeparator' => ['notEmpty'],
+        'elementPrefix' => ['notEmpty'],
+        'discountPrefix' => ['notEmpty'],
+        'translitPrefix' => ['notEmpty'],
+        'mode' => ['toMode'],
+        'softDelete' => ['toBool'],
+        'exceptionOnDebug' => ['toBool'],
+        'action' => ['toAction'],
+    ];
+
+    public function __construct($values) {
+        $publicVariableNamesForValidation = $this->publicVariableNames;
+
+        foreach ($values as $key => $value) {
+            $this->setValue($key, $value);
+            unset($publicVariableNamesForValidation[$key]);
         }
-        /*
-                if ($res = $this->getRelation()) {
-                    $this->relationArray = $res;
+
+        foreach ($publicVariableNamesForValidation as $variableName => $validators) {
+            $this->validateField($variableName);
+        }
+    }
+
+    public function run() {
+        Bitrix\Main\Diag\Debug::startTimeLabel("run");
+
+        $this->runAction();
+
+        Bitrix\Main\Diag\Debug::endTimeLabel("run");
+
+        $this->message('Выполнение заняло: ' . Bitrix\Main\Diag\Debug::getTimeLabels()['run']['time'] . ' сек.', false);
+    }
+
+    protected function runAction() {
+        call_user_func([$this, $this->getNormalizedAction()]);
+    }
+
+    protected function getNormalizedAction() {
+        $action = str_replace(['-', '_', ' '], '', $this->action) . 'Action';
+
+        if (!method_exists($this, $action)) {
+            $action = self::DEFAULT_ACTION . 'Action';
+        }
+
+        return $action;
+    }
+
+    protected function notEmpty($variableName) {
+        if (!strlen(trim((string)$this->{$variableName}))) {
+            $this->message($this->status('Значение ' . $variableName . ' не должно быть пустым', 'error'), true);
+        }
+    }
+
+    protected function toBool($variableName) {
+        $this->{$variableName} = (bool)$this->{$variableName};
+    }
+
+    protected function toMode($variableName) {
+        $this->{$variableName} = $this->{$variableName} == 'import' ? 'import' : 'debug';
+    }
+
+    protected function toAction($variableName) {
+        if (!strlen(trim((string)$this->{$variableName}))) {
+            $this->{$variableName} = self::DEFAULT_ACTION;
+        }
+    }
+
+    protected function setValue($variableName, $value) {
+        if (array_key_exists($variableName, $this->publicVariableNames)) {
+            $this->{$variableName} = $value;
+            $this->validateField($variableName);
+        }
+    }
+
+    protected function validateField($variableName) {
+        if (array_key_exists($variableName, $this->publicVariableNames)) {
+            $validators = $this->publicVariableNames[$variableName];
+
+            foreach ($validators as $validator) {
+                if (method_exists($this, $validator)) {
+                    call_user_func([$this, $validator], $variableName);
                 }
-        */
-    }
-
-    public static function getInstance() {
-        if (self::$_instance == null) {
-            self::$_instance = new self();
+            }
         }
-
-        return self::$_instance;
     }
 
-    public function __clone() {
-        trigger_error('Clone is not allowed.', E_USER_ERROR);
-    }
+    protected function importItemsAction() {
+        $this->initIBlocks();
 
-    public function __wakeup() {
-        trigger_error('Unserializing is not allowed.', E_USER_ERROR);
-    }
+        $this->printImportBegin();
+        $this->initExistingProducts();
+        $this->initYmlFile();
+        $this->initInputSections();
+        $this->initOutputSections();
+        $this->parseSectionsMappingFile();
 
-    public function getXmlToObject($file) {
-        return simplexml_load_file($file);
-    }
+        foreach ($this->getElementsGroupedBySections() as $arSection) {
+            $this->printSectionBegin($arSection);
 
-    public function importCatalogs($xmlObj) {
-        $arParents = array_keys($this->relationArray);
-        $arCategories = [];
-        foreach ($xmlObj->shop->categories->category as $category) {
-            if (in_array($category['id'], $arParents) && empty($category['parentId'])) {
-                $parentId = $this->getBxParentId((string)$category['id']);
-                $item = [
-                    'id'              => (string)$category['id'],
-                    'parentId'        => $parentId,
-                    'relatedParentId' => $this->getCatalogBxId($parentId),
-                    'name'            => $category['id'] == 1677 ? 'Для жилых комнат' : trim($category[0]),
+            foreach ($arSection['items'] as $xmlId => $arElement) {
+                $this->elementStatus = [];
+
+                if ($arElement['offersCount'] > 1) {
+                    $this->elementStatus[] = ['status' => 'no action', 'text' => 'торговых предложений: ' . $arElement['offersCount']];
+                }
+
+                $xmlId = $this->getXmlId($arElement['xmlId']);
+                if (isset($this->existingElements[$xmlId])) {
+                    $this->existingElements[$xmlId]['ymlExists'] = true;
+                }
+
+                if ($this->mode == 'debug') {
+                    $haveDiscount = false;
+                    if (isset($this->existingElements[$xmlId])) {
+                        $this->elementStatus[] = ['status' => 'no action', 'text' => 'есть элемент'];
+                        if (isset($this->existingProducts[$xmlId])) {
+                            $this->elementStatus[] = ['status' => 'no action', 'text' => 'помечен как товар'];
+                        }
+                        if (isset($this->existingPrices[$xmlId])) {
+                            $this->elementStatus[] = ['status' => 'no action', 'text' => 'есть цена'];
+                        }
+                        if (isset($this->existingDiscounts[$xmlId])) {
+                            $haveDiscount = true;
+                            $this->elementStatus[] = ['status' => 'no action', 'text' => 'есть скидка'];
+                            if ($arElement['finalPrice'] != $arElement['originalPrice']) {
+                                $this->elementStatus[] = ['status' => 'no action', 'text' => 'скидка обновится'];
+                            } else {
+                                $this->elementStatus[] = ['status' => 'no action', 'text' => 'скидка удалится'];
+                            }
+                        }
+                    }
+
+                    if (!$haveDiscount) {
+                        if ($arElement['finalPrice'] != $arElement['originalPrice']) {
+                            $this->elementStatus[] = ['status' => 'no action', 'text' => 'будет создана скидка'];
+                        }
+                    }
+                }
+
+                $arFields = [
+                    'NAME' => $arElement['name'],
+                    'ACTIVE' => 'Y',
+                    'IBLOCK_SECTION_ID' => $this->getMappingSection($this->inputSections[$arElement['sectionId']]['path']),
+                    'IBLOCK_ID' => $this->iblock['id'],
+                    'XML_ID' => $this->getXmlId($arElement['xmlId']),
+                    'CODE' => CUtil::translit($this->translitPrefix . $arElement['xmlId'], 'ru', ['replace_space' => '-', "replace_other" => '-']),
+                    'DETAIL_TEXT' => $arElement['description'],
+                    'DETAIL_PICTURE' => $arElement['picturePath'] !== null ? CFile::MakeFileArray($arElement['picturePath']) : null,
+                    'PROPERTY_VALUES' => [],
                 ];
 
-                if ($this->addSubCatalog($item)) {  // add sub-catalog
-//                    $arCategories[(string)$category['id']] = $item;
-                    $arCategories[] = (int)$category['id'];
+                $propertyValues = [];
+
+                foreach($arElement['properties'] as $name => $values) {
+                    $i = 0;
+                    $propName = 'ATTR_' . strtoupper($name);
+
+                    foreach($values as $value) {
+                        $propertyValues[$propName]['n' . $i] = ['VALUE' => $value];
+                        $i++;
+                    }
                 }
 
-            } elseif (in_array($category['parentId'], $arParents)) {
-                if (!in_array($category['id'], $arParents)) {
+                if (!empty($propertyValues)) {
+                    $arFields['PROPERTY_VALUES'] += $propertyValues;
+                }
 
-                    $arParents[] = (int)$category['id'];
-                    $item = [
-                        'id'              => (string)$category['id'],
-                        'parentId'        => (string)$category['parentId'],
-                        'relatedParentId' => $this->getCatalogBxId((string)$category['parentId']),
-                        'name'            => trim($category[0]),
-                    ];
+                if ($this->mode == 'import') {
+                    if ($elementId = $this->writeElement($arFields)) {
+                        $this->count['elements']++;
+                        if ($this->writeProduct($elementId, $arFields['XML_ID'], $arElement)) {
+                            if ($this->writePrice($elementId, $arFields['XML_ID'], $arElement)) {
+                                $result = $this->checkDiscount($elementId, $arFields['XML_ID'], $arElement);
+                                if (($result !== false) && ($result !== null) && ($result != 'could not delete')) {
+                                    $this->count['discounts']++;
+                                }
+                            }
+                        }
+                    }
+                } elseif ($this->mode == 'debug') {
 
-                    if ($this->addCatalog($item)) {
-//                        $arCategories[$item['id']] = $item;
-                        $arCategories[] = (int)$category['id'];
+                }
+                $this->printElement($arSection, $arFields, $arElement);
+            }
+
+            $this->printSectionEnd($arSection);
+        }
+
+        $this->deleteNotExistingYmlProducts();
+
+        $this->totals();
+    }
+
+    protected function generateMappingFileAction() {
+        clearstatcache();
+        if (file_exists($this->mappingFilePath) && filesize($this->mappingFilePath)) {
+            $this->message($this->status('Файл <b>' . $this->mappingFilePath . '</b> не пустой', 'error'), false);
+            return;
+        }
+
+        $this->initIBlocks();
+        $this->initYmlFile();
+        $this->initInputSections();
+        $string = '';
+        foreach ($this->inputSections as $arSection) {
+            $string .= $arSection['path'] . ' = ' . "\n";
+        }
+
+        if (empty($this->inputSections)) {
+            $this->message('В файле <b>' . $this->ymlFilePath . '<b> нет категорий', false);
+        }
+
+        $this->initOutputSections();
+        $string2 = '';
+        foreach ($this->outputSections as $path => $id) {
+            $string2 .= $path . "\n";
+        }
+
+        if (count($this->outputSections) == 1) {
+            $this->message('В инфоблоке ' . $this->iblock['name'] . ' (' . $this->iblock['id'] . ') [' . $this->iblock['type'] . '] нет разделов', false);
+        } else {
+            $string2 = "\n" . 'Разделы инфоблока:' . "\n" . $string2;
+        }
+
+        if (file_put_contents($this->mappingFilePath, $string . $string2) !== false) {
+            $this->message($this->status('Файл назначения разделов <b>' . $this->mappingFilePath . '</b> сгенерирован', 'success'), false);
+        }
+    }
+
+    protected function deleteProductsAndDiscountsAction() {
+        $this->initIBlocks();
+
+        $discountNames = [];
+
+        $rsElements = CIBlockElement::GetList([], ['IBLOCK_ID' => $this->iblock['id'], 'XML_ID' => $this->elementPrefix . '%'], false, false, ['ID', 'NAME', 'XML_ID']);
+        while ($arElement = $rsElements->Fetch()) {
+            if (strpos($arElement['XML_ID'], $this->elementPrefix) === 0) {
+                $discountName = $this->getDiscountName($arElement['ID'], $arElement['XML_ID'], $arElement['NAME']);
+                $discountNames[$discountName] = true;
+
+                if (CIBlockElement::Delete($arElement['ID'])) {
+                    $this->message('Элемент <b>' . $arElement['NAME'] . '</b> <small>[id:' . $arElement['ID'] . ',внешний код:' . $arElement['XML_ID'] . ']</small> удален', false);
+                    $this->count['deleted_elements']++;
+                } else {
+                    $this->message($this->status('Ошибка удаления элемента <b>' . $arElement['NAME'] . '</b> <small>[id:' . $arElement['ID'] . ',внешний код:' . $arElement['XML_ID'] . ']</small>', 'error'), false);
+                }
+            }
+        }
+
+        if ($this->count['deleted_elements'] == 0) {
+            $this->message($this->status('Нет элементов инфоблока ' . $this->iblock['name'] . ' (' . $this->iblock['id'] . ') [' . $this->iblock['type'] . '] с префиксом "<b>' . $this->elementPrefix . '</b>" для удаления', 'no action'), false);
+        } else {
+            $this->message('<br>', false);
+        }
+
+        if (!empty($discountNames)) {
+            $rsDiscounts = CSaleDiscount::GetList([], ['~NAME' => $this->discountPrefix . '%'], false, false, ['ID', 'NAME']);
+            while ($arDiscount = $rsDiscounts->Fetch()) {
+                if (strpos($arDiscount['NAME'], $this->discountPrefix) === 0) {
+                    if (isset($discountNames[$arDiscount['NAME']])) {
+                        if (CSaleDiscount::Delete($arDiscount['ID'])) {
+                            $this->message('Скидка <b>' . $arDiscount['NAME'] . '</b> <small>[id:' . $arDiscount['ID'] . ']</small> удалена', false);
+                            $this->count['deleted_discounts']++;
+                        } else {
+                            $this->message($this->status('Ошибка удаления скидки <b>' . $arDiscount['NAME'] . '</b> <small>[id:' . $arDiscount['ID'] . ']</small>', 'error'), false);
+                        }
                     }
                 }
             }
         }
 
-        return $arCategories;
-//        return $arParents;
+        if ($this->count['deleted_discounts'] == 0) {
+            $this->message($this->status('Нет скидок от удаленных товаров с префиксом "<b>' . $this->discountPrefix . '</b>" для удаления', 'no action'), false);
+        }
+
+        $this->totals();
     }
 
-    public function getBxParentId($id) {
-        $arCatalog = $this->relationArray;
+    protected function initYmlFile() {
+        $this->xmlObj = simplexml_load_file($this->ymlFilePath);
 
-        return ($arCatalog[$id] ? $arCatalog[$id] : false);
-    }
-
-    public function addSubCatalog($catalog) {
-        $parentBxId = $this->getCatalogBxId($catalog['parentId']);  // (get parent BX id) get catalog id Мебель
-        if ($parentBxId) {
-            $arFields = Array(
-                "NAME"              => $catalog['name'],
-                "ACTIVE"            => 'N',
-                "IBLOCK_SECTION_ID" => $parentBxId,
-                "IBLOCK_ID"         => self::CATALOG_ID,
-                "UF_YAML_ID"        => $catalog['id'],
-                "CODE"              => Cutil::translit($catalog['name'], "ru", array("replace_space" => "-", "replace_other" => "-")),
-            );
-            $id = $this->getCatalogBxId($catalog['id']); // получение соответствующего BX Id по Id из yaml-файла
-
-            return $this->catalogAddUpdate($id, $arFields);
-        } else {
-            return false;
+        if ($this->xmlObj === false) {
+            $this->message($this->message('Не удалось прочитать yml-файл: <b>' . $this->ymlFilePath . '</b>', 'error'), true);
         }
     }
 
-    public function addCatalog($category) {
-        if ($category['relatedParentId']) {
-            $arFields = Array(
-                "NAME"              => $category['name'],
-                "ACTIVE"            => 'N',
-                "IBLOCK_SECTION_ID" => $category['relatedParentId'],
-                "IBLOCK_ID"         => self::CATALOG_ID,
-                "UF_YAML_ID"        => $category['id'],
-                "CODE"              => Cutil::translit($category['name'], "ru", array("replace_space" => "-", "replace_other" => "-")),
-            );
-
-            $catalogBxId = $this->getCatalogBxId($category['id']);
-
-            return $this->catalogAddUpdate($catalogBxId, $arFields);
-        } else {
-            return false;
-        }
-    }
-
-    public function catalogAddUpdate($id, $arFields) {
-        $bs = new CIBlockSection;
-        if (!$id) { // if not exist catalog - add
-            $id = $bs->Add($arFields);
-        } else {
-            if( !empty($arFields["ACTIVE"])  ) {
-                    unset( $arFields["ACTIVE"] );
-                }
-            if ($bs->Update($id, $arFields)) {
-//            echo "Update: " . $id
-            } else {
-                echo "Error update: " . $bs->LAST_ERROR;
+    protected function message($message, $isException = null) {
+        if (!is_bool($isException)) {
+            if (
+                (($this->mode == 'debug') && $this->exceptionOnDebug)
+                || $this->mode == 'import'
+            ) {
+                $isException = true;
+            } elseif ($this->mode == 'debug') {
+                $isException = false;
             }
         }
 
-        return ($id ? $id : false);
+        if ($isException === true) {
+            throw new Exception(strip_tags($message));
+        } elseif ($isException === false) {
+            echo $message . '<br>';
+        }
     }
 
-    public function getCatalogBxId($uf_yaml_id) {
+    protected function totals() {
+        $string = '<br>';
 
-        $arFilter = ["IBLOCK_ID"   => self::CATALOG_ID,
-                     // 'ACTIVE'      => 'Y',
-                     "=UF_YAML_ID" => $uf_yaml_id,
-                     'TYPE'        => 'catalog',
-        ];
-        $res = CIBlockSection::GetList([], $arFilter, false, ['UF_YAML_ID']);
+        foreach ($this->count as $key => $value) {
+            if ($value > 0) {
+                $string .= $key . ': ' . $value . '<br>';
+            }
+        }
 
-        $ar_res = $res->Fetch();
-
-        return ($ar_res['UF_YAML_ID'] ? $ar_res['ID'] : false);
+        $this->message($string, false);
     }
 
-    public function modifyUrlPic($url) {
-        return str_replace('/preview', '', $url);
+    protected function getDiscountName($productId, $xmlId, $productName) {
+        return $this->discountPrefix . $productName . ' [id:' . $productId . ',внешний код:' . $xmlId . ']';
     }
 
-    public function importItems($xmlObj, $arCategories) {
-//        $items = [];
-        $addedItemsCount = 0;
-        foreach ($xmlObj->shop->offers->offer as $offer) {
-            if (in_array((int)$offer->categoryId, $arCategories)) {
-                $item = [
-                    'id'                => (string)$offer['id'],
-                    'categoryId'        => (string)$offer->categoryId,
-                    'relatedParentId'   => $this->getCatalogBxId((string)$offer->categoryId),
-                    "available"         => (string)$offer["available"],
-                    'price'             => (string)$offer->price,
-                    'currencyId'        => (string)$offer->currencyId,
-                    'name'              => (string)$offer->typePrefix . ' ' . (string)$offer->vendor . ' ' . (string)$offer->model,
-                    'code'              => Cutil::translit((string)$offer->typePrefix . ' ' . (string)$offer->vendor . ' ' . (string)$offer->model, "ru", array("replace_space" => "-", "replace_other" => "-")),
-                    'description'       => (string)$offer->description,
-                    'country_of_origin' => '<b>Страна производитель: </b>' . (string)$offer->country_of_origin,
-                    'picture'           => array_map([$this, 'modifyUrlPic'], (array)$offer->picture),
+    protected function getXmlId($xmlId) {
+        return $this->elementPrefix . $xmlId;
+    }
+
+    protected function getCurrency($productId, $currency) {
+        if ($currency != 'RUB') {
+            $this->message($this->status('Валюта <small>[id:' . $productId . ']</small>: ' . $currency, 'error'));
+        }
+
+        return 'RUB';
+    }
+
+    protected function unparseUrlWoQueryAndFragment($parsedUrl) {
+        $scheme = isset($parsedUrl['scheme']) ? $parsedUrl['scheme'] . '://' : '';
+        $host = isset($parsedUrl['host']) ? $parsedUrl['host'] : '';
+        $port = isset($parsedUrl['port']) ? ':' . $parsedUrl['port'] : '';
+        $user = isset($parsedUrl['user']) ? $parsedUrl['user'] : '';
+        $pass = isset($parsedUrl['pass']) ? ':' . $parsedUrl['pass']  : '';
+        $pass = ($user || $pass) ? "$pass@" : '';
+        $path = isset($parsedUrl['path']) ? $parsedUrl['path'] : '';
+
+        return "$scheme$user$pass$host$port$path";
+    }
+
+    protected function formatString($string) {
+        return trim(str_replace(['&quot;', '&amp;', '&gt;', '&lt;', '&apos;'], ['"', '&', '>', '<', "'"], $string));
+    }
+
+    protected function status($text, $status) {
+        if ($status == 'success') {
+            $color = 'green';
+        } elseif ($status == 'no action') {
+            $color = 'peru';
+        } elseif ($status == 'error') {
+            $color = 'red';
+        } else {
+            $color = $status;
+        }
+
+        return '<font color="' . $color . '">' . $text . '</font>';
+    }
+
+    protected function parseSectionsMappingFile() {
+        if (empty($this->outputSections)) {
+            $this->message($this->status('Привязка разделов: в инфоблоке ' . $this->iblock['name'] . ' (' . $this->iblock['id'] . ') [' . $this->iblock['type'] . '] нет разделов', 'no action'), false);
+            return;
+        }
+
+        $handle = fopen($this->mappingFilePath, "r");
+        if ($handle) {
+            $lineNumber = 1;
+            while (($line = fgets($handle)) !== false) {
+                $line = trim($line);
+
+                if (strlen($line)) {
+                    $instruction = explode($this->mappingSeparator, $line);
+                    if (count($instruction) != 2) {
+                        $this->message($this->status('Привязка разделов: строка (' . $lineNumber . ') "<b>' . $line . '</b>" некорректна', 'error'));
+                    }
+                    $input = rtrim($instruction[0]);
+                    $output = ltrim($instruction[1]);
+
+                    if (isset($this->outputSections[$output])) {
+                        $this->sectionsMapping[$input] = $output;
+                    } else {
+                        $this->message($this->status('Привязка разделов: несуществующий раздел "<b>' . $output . '</b>", к которому привязан раздел "<b>' . $input . '</b>"', 'error'));
+                    }
+                }
+
+                $lineNumber++;
+            }
+
+            fclose($handle);
+
+            if ($lineNumber == 1) {
+                $this->message($this->status('Привязка разделов: файл <b>' . $this->mappingFilePath . '</b> пустой', 'error'), true);
+            }
+        } else {
+            $this->message($this->status('Привязка разделов: не удалось открыть файл <b>' . $this->mappingFilePath . '</b>', 'error'), true);
+        }
+    }
+
+    protected function getMappingSection($path) {
+        if ($path === null) {
+            return;
+        }
+
+        $outputPath = $this->sectionsMapping[$path];
+        if (isset($outputPath)) {
+            $mappedId = $this->outputSections[$outputPath];
+            if (isset($mappedId)) {
+                return $mappedId;
+            }
+        }
+
+        $this->message($this->status('Не удалось определить привязанный раздел yml-раздела <b>' . $path . '</b>', 'error'));
+    }
+
+    protected function initExistingProducts() {
+        $rsGroups = CGroup::GetList(($by = 'c_sort'), ($order = 'desc'), ['NAME' => $this->allUsersGroupName]);
+        if ($arGroup = $rsGroups->Fetch()) {
+            $this->allUsersGroup = [$arGroup['ID']];
+        } else {
+            $this->message($this->status('Не определена группа пользователей "' . $this->allUsersGroupName . '", установка скидок невозможна', 'error'), true);
+        }
+
+        $productIdsToXmlIds = [];
+        $discountNames = [];
+
+        $rsElements = CIBlockElement::GetList([], ['IBLOCK_ID' => $this->iblock['id'], 'XML_ID' => $this->elementPrefix . '%'], false, false, ['ID', 'NAME', 'ACTIVE', 'XML_ID']);
+        while ($arElement = $rsElements->Fetch()) {
+            if (strpos($arElement['XML_ID'], $this->elementPrefix) === 0) {
+                $this->existingElements[$arElement['XML_ID']] = [
+                    'id' => $arElement['ID'],
+                    'name' => $arElement['NAME'],
+                    'xmlId' => $arElement['XML_ID'],
+                    'active' => $arElement['ACTIVE'] == 'Y',
+                    'ymlExists' => false,
                 ];
 
-                if ($item['relatedParentId']) {
-//                    $items[(string)$offer['id']] = $item;
-                    $this->addItemToCatalog($item);
+                $productIdsToXmlIds[$arElement['ID']] = [
+                    'XML_ID' => $arElement['XML_ID'],
+                    'NAME' => $arElement['NAME'],
+                ];
 
-                    $addedItemsCount++;
+                $discountName = $this->getDiscountName($arElement['ID'], $arElement['XML_ID'], $arElement['NAME']);
+                $discountNames[$discountName] = $arElement['XML_ID'];
+            }
+        }
+
+        if (!empty($productIdsToXmlIds)) {
+            $rsPrices = CPrice::GetList([], ['@PRODUCT_ID' => array_keys($productIdsToXmlIds)], false, false, ['ID', 'PRODUCT_ID']);
+            while ($arPrice = $rsPrices->Fetch()) {
+                $xmlId = $productIdsToXmlIds[$arPrice['PRODUCT_ID']]['XML_ID'];
+                $this->existingPrices[$xmlId] = $arPrice['ID'];
+            }
+
+            $rsCatalogProducts = CCatalogProduct::GetList([], ['@ID' => array_keys($productIdsToXmlIds)], false, false, ['ID']);
+            while ($arProduct = $rsCatalogProducts->Fetch()) {
+                $xmlId = $productIdsToXmlIds[$arProduct['ID']]['XML_ID'];
+                $this->existingProducts[$xmlId] = $arProduct['ID'];
+            }
+        }
+
+        $this->catalogGroupBase = CCatalogGroup::GetBaseGroup()['ID'];
+        if (!isset($this->catalogGroupBase)) {
+            $this->message($this->status('Нет базового типа цен. Создание пометки товара и цен невозможно', 'error'), true);
+        }
+
+        $rsDiscounts = \Bitrix\Sale\Internals\DiscountTable::getList(['filter' => ['NAME' => $this->discountPrefix . '%']]);
+        while ($arDiscount = $rsDiscounts->Fetch()) {
+            if (strpos($arDiscount['NAME'], $this->discountPrefix) === 0) {
+                $xmlId = $discountNames[$arDiscount['NAME']];
+                if (!isset($xmlId)) {
+                    $this->message($this->status('Скидка "<b>' . $arDiscount['NAME'] . '</b>" (' . $arDiscount['ID'] . ') не привязана ни к одному yml-товару', 'error'), false);
+                    continue;
+                }
+
+                if (isset($this->existingDiscounts[$xmlId])) {
+                    $this->message($this->status('Скидка "<b>' . $arDiscount['NAME'] . '</b>" (' . $arDiscount['ID'] . ') повторяется', 'error'), false);
+                } else {
+                    $this->existingDiscounts[$xmlId] = [
+                        'ID' => $arDiscount['ID'],
+                        'LID' => $arDiscount['LID'],
+                        'XML_ID' => $arDiscount['XML_ID'],
+                        'NAME' => $arDiscount['NAME'],
+                        'CURRENCY' => $arDiscount['CURRENCY'],
+                        'PRIORITY' => $arDiscount['PRIORITY'],
+                        'LAST_DISCOUNT' => $arDiscount['LAST_DISCOUNT'],
+                        'LAST_LEVEL_DISCOUNT' => $arDiscount['LAST_LEVEL_DISCOUNT'],
+                        'USER_GROUPS' => $this->allUsersGroup,
+                    ];
                 }
             }
-//            if ($addedItemsCount > 99) break;
         }
-
-        if (!$this->bUpdateSearch && $addedItemsCount > 0) {
-            CSearch::ReIndexModule('iblock');
-        }
-
-//        return $items;
-        return $addedItemsCount;
     }
 
-    public function addItemToCatalog($item) {
-        $arLoadProductArray = Array(
-            "IBLOCK_SECTION_ID" => $item['relatedParentId'],
-            "IBLOCK_ID"         => self::CATALOG_ID,
-            "NAME"              => $item["name"],
-            "CODE"              => $item["code"],
-            "ACTIVE"            => "Y",
-            "SORT"              => "501",
-            "DETAIL_TEXT"       => $item["description"],
-//            "PREVIEW_PICTURE"   => CFile::MakeFileArray($item['picture'][0]),
-//            "PREVIEW_PICTURE"   => $this->getImg($item['picture'][0]),
-        );
+    protected function deleteNotExistingYmlProducts() {
+        $haveElementsNotInYmlExist = false;
+        $discountNames = [];
 
-        $prop = [
-            'ABOUT_BRAND'     => $item['country_of_origin'],
-            'YAML_ID'         => $item['id'],
-            "PARTNER_PRODUCT" => self::PARTNER_PRODUCT_SELECTED_ID
-        ];
+        foreach ($this->existingElements as $arElement) {
+            if (!$arElement['ymlExists'] && (($this->softDelete && $arElement['active']) || !$this->softDelete)) {
+                if (!$haveElementsNotInYmlExist) {
+                    $this->message('<h2>Удаление несуществующих в yml-файле товаров:</h2>', false);
+                }
+                $haveElementsNotInYmlExist = true;
 
-        $el = new CIBlockElement;
+                if (!$this->softDelete) {
+                    $discountNames[] = $this->getDiscountName($arElement['id'], $arElement['xmlId'], $arElement['name']);
+                }
 
-        $PRODUCT_ID = $this->existItem($item);   // get Bx item Id
+                if ($this->mode == 'debug') {
+                    $this->message($this->status('Будет удален элемент <b>' . $arElement['name'] . '</b> <small>[id:' . $arElement['id'] . ',внешний код:' . $arElement['xmlId'] . ']</small>', 'no action'), false);
+                } elseif ($this->mode == 'import') {
+                    if ($this->softDelete) {
+                        $el = new CIBlockElement;
+                        $removed = $el->Update($arElement['id'], ['ACTIVE' => 'N']);
+                    } else {
+                        $removed = CIBlockElement::Delete($arElement['id']);
+                    }
 
-        if (!$PRODUCT_ID || $this->updatePic) {
-            $arPictures = array_map([$this, 'getImg'], $item['picture']);
-            $arLoadProductArray["PREVIEW_PICTURE"] = $arPictures[0];
-            $prop['PHOTO'] = $arPictures;
+                    if ($removed) {
+                        $this->message('Элемент <b>' . $arElement['name'] . '</b> <small>[id:' . $arElement['id'] . ',внешний код:' . $arElement['xmlId'] . ']</small> удален', false);
+                        $this->count['deleted_elements']++;
+                    } else {
+                        $exceptionMessage = $GLOBALS['APPLICATION']->GetException() !== false ? $GLOBALS['APPLICATION']->GetException()->GetString() : '<i>без описания</i>';
+                        $this->message($this->status('Ошибка удаления элемента <b>' . $arElement['name'] . '</b> <small>[id:' . $arElement['id'] . ',внешний код:' . $arElement['xmlId'] . ']</small>: ' . $exceptionMessage, 'error'));
+                    }
+                }
+            }
         }
-        if (!$PRODUCT_ID) {
-            if ($PRODUCT_ID = $el->Add($arLoadProductArray, false, $this->bUpdateSearch)) {
-//                echo "Added: " . $PRODUCT_ID;
-            } else
-                echo "Error added : " . $el->LAST_ERROR;
-        } else {
-            if ($el->Update($PRODUCT_ID, $arLoadProductArray, false, $this->bUpdateSearch)) {
-//                echo "Update: " . $PRODUCT_ID;
+
+        if (!empty($discountNames)) {
+            if (!$this->softDelete) {
+                if ($haveElementsNotInYmlExist) {
+                    $this->message('', false);
+                }
+
+                $rsDiscounts = CSaleDiscount::GetList([], ['@NAME' => $discountNames], false, false, ['ID', 'NAME']);
+                while ($arDiscount = $rsDiscounts->Fetch()) {
+                    if ($this->mode == 'debug') {
+                        $this->message($this->status('Будет удалена скидка <b>' . $arDiscount['NAME'] . '</b> <small>[id:' . $arDiscount['ID'] . ']</small>', 'no action'), false);
+                    } elseif ($this->mode == 'import') {
+                        if (strpos($arDiscount['NAME'], $this->discountPrefix) === 0) {
+                            if (CSaleDiscount::Delete($arDiscount['ID'])) {
+                                $this->message('Скидка <b>' . $arDiscount['NAME'] . '</b> <small>[id:' . $arDiscount['ID'] . ']</small> удалена', false);
+                                $this->count['deleted_discounts']++;
+                            } else {
+                                $this->message($this->status('Ошибка удаления скидки <b>' . $arDiscount['NAME'] . '</b> <small>[id:' . $arDiscount['ID'] . ']</small>', 'error'), false);
+                            }
+                        }
+                    }
+                }
             } else {
-                echo "Error update: " . $el->LAST_ERROR;
+                $this->message('Скидки не удаляются, потому что включен режим деактивации элементов (для выключения передайте параметр disable_soft_delete=1), вместо удаления', false);
             }
         }
-
-        $this->setItemProperties($PRODUCT_ID, $prop);
-
-        $arFields = array("ID" => $PRODUCT_ID, 'QUANTITY' => '1');
-        if (CCatalogProduct::Add($arFields)) {
-//        echo "Добавили параметры товара к элементу каталога " . $PRODUCT_ID . '<br>';
-            $this->setItemPrice($PRODUCT_ID, $item);
-        } else {
-            echo 'Ошибка добавления параметров<br>';
-        }
     }
 
-    public function existItem($item) {
-        $arItem = $this->itemsCurrent[$item['id']];
-
-        return ($arItem['IBLOCK_SECTION_ID'] == $item['relatedParentId'] ? $arItem['ID'] : false);
-    }
-
-    public function setItemProperties($PRODUCT_ID, $prop) {
-        if ($prop['PHOTO']) {
-            // delete photos from PROPERTY PHOTO
-            CIBlockElement::SetPropertyValuesEx($PRODUCT_ID, self::CATALOG_ID, ['PHOTO' => ["VALUE" => ["del" => "Y"]]]);
-        }
-        // set properties
-        CIBlockElement::SetPropertyValuesEx($PRODUCT_ID, self::CATALOG_ID, $prop);
-    }
-
-    public function getPhoto($photo) {
-        $res = CFile::MakeFileArray($photo, false, true);
-
-        return ($res > 0 ? $res : false);
-    }
-
-    public function setItemPrice($productId, $item) {
-        $PRICE_TYPE_ID = 1;
-
-        $arFields = Array(
-            "PRODUCT_ID"       => $productId,
-            "CATALOG_GROUP_ID" => $PRICE_TYPE_ID,
-            "PRICE"            => $item['price'],
-            "CURRENCY"         => "BYR", //$item['currencyId'], // in yml-file code BYN
-            "QUANTITY_FROM"    => false,
-            "QUANTITY_TO"      => false
-        );
-
-        $res = CPrice::GetList(
-            array(),
-            array(
-                "PRODUCT_ID"       => $productId,
-                "CATALOG_GROUP_ID" => $PRICE_TYPE_ID
-            )
-        );
-
-        if ($arr = $res->Fetch()) {
-            CPrice::Update($arr["ID"], $arFields);
-        } else {
-            CPrice::Add($arFields);
-//        echo "Добавили price " . $productId . '<br>';
-        }
-    }
-
-    public function getCategoryItemsCount($xmlObj, $catId) {
-        $i = 0;
-        foreach ($xmlObj->shop->offers->offer as $offer) {
-            if ((string)$offer->categoryId == (string)$catId) {
-                $i++;
-            }
+    protected function initIBlocks() {
+        if (!strlen(trim($this->iblockCode))) {
+            $this->message($this->status('Код инфоблока пустой', 'error'), true);
         }
 
-        return $i;
-    }
+        $filterKey = is_numeric($this->iblockCode) ? 'ID' : 'CODE';
 
-    public function showListCatalog($value) {
-        $i = 0;
-        $ii = 0;
-        foreach ($value->shop->categories->category as $category) {
-            $items = $this->getCategoryItemsCount($value, $category['id']);
-            $ii += $items;
-
-            if (!$category['parentId']) {
-                echo ' items =  ' . $ii . '<br>';
-//                echo($category['parentId'] ? '<br>' : '<br>----------------------------------------------------------------<br>');
-                echo 'id = ' . $category['id']
-//                    . ' parent id = ' . ($category['parentId'] ? $category['parentId'] : 'NULL')
-                    . ' name = ' . $category[0]//                    . ' items =  ' . $items
-                ;
-
-//                echo($category['parentId'] ? '' : '<br>----------------------------------------------------------------');
-            }
-
-            if (!$category['parentId']) {
-                $ii = 0;
-            }
-
-            $i++;
-        }
-        echo '<br>catalogs: ' . $i . ' - ' . $ii;
-
-        $i = 0;
-        foreach ($value->shop->offers->offer as $offer) {
-            $i++;
-        }
-        echo '<br>items: ' . $i;
-    }
-
-    public function getYamlImg($xmlObj, $arCategories) {
-        $images = [];
-        foreach ($xmlObj->shop->offers->offer as $offer) {
-            if (in_array((int)$offer->categoryId, $arCategories)) {
-                $arImg = array_map([$this, 'modifyUrlPic'], (array)$offer->picture);
-                foreach ($arImg as $image) {
-                    $data = explode("/", $image);
-                    $fileName = $data[7];
-                    $dir = $data[5] . '/' . $data[6];
-                    $images[$fileName] = $dir;
-                }
-            }
-        }
-
-//        var_dump(array_diff_assoc($tmp, array_unique($tmp)));
-
-        return $images;
-    }
-
-    public function createDir($dir) {
-        return mkdir($dir, 0777, true);
-    }
-
-    public function getPicUrl($xmlObj) {
-        $this->file = fopen($_SERVER['DOCUMENT_ROOT'] . $this->urlTxt, "w");
-        $pic = [];
-        foreach ($xmlObj->shop->offers->offer as $offer) {
-            $item = [
-                'id'      => (string)$offer['id'],
-                'picture' => array_map([$this, 'saveToFileUrlPic'], (array)$offer->picture),
+        $rsIBlocks = CIBlock::GetList([], [$filterKey => $this->iblockCode]);
+        if ($arIBlock = $rsIBlocks->Fetch()) {
+            $arIBlockType = CIBlockType::GetByIDLang($arIBlock['IBLOCK_TYPE_ID'], LANG_ID);
+            $this->iblock = [
+                'id' => $arIBlock['ID'],
+                'name' => $arIBlock['NAME'],
+                'type' => $arIBlockType['NAME'],
             ];
-            $pic[$item['id']] = $item['picture'];
+        } else {
+            $this->message($this->status('Инфоблок "<b>' . $this->iblockCode . '</b>" не найден', 'error'), true);
         }
-
-        fclose($this->file);
-
-        return $pic;
     }
 
-    public function saveToFileUrlPic($url) {
-        $url = str_replace('/preview', '', $url);
-        fwrite($this->file, $url . "\r\n");
+    protected function initInputSections() {
+        foreach ($this->xmlObj->shop->categories->category as $category) {
+            $xmlId = (string)$category->attributes()['id'];
 
-        return $url;
-    }
-
-    public function getUploadImg($from) {
-        $arUploadImg = [];
-        if ($handle = opendir($from)) {
-            while (false !== ($file = readdir($handle))) {
-                if ($file != "." && $file != "..") {
-                    $arUploadImg[] = $file;
-                }
-            }
-        }
-
-        return $arUploadImg;
-    }
-
-    public function moveImage($fileName, $from, $to) {
-        $this->createDir($to);
-
-        return (file_exists($to . '/' . $fileName)
-            ?: copy($from . '/' . $fileName, $to . '/' . $fileName));
-
-//        return (file_exists($to . '/' . $fileName)
-//            ?: rename($from . '/' . $fileName, $to . '/' . $fileName));
-    }
-
-    public function workWithImages($xmlObj, $from) {
-
-        $arCategories = $this->getYmlCategories($xmlObj);
-
-        $arYamlImg = $this->getYamlImg($xmlObj, $arCategories);   // get name & directory img-file from yaml-file
-
-//        $from = $_SERVER['DOCUMENT_ROOT'] . $from;
-        // $from = realpath(dirname(__FILE__) . "/../../../../..") . "/domatv_image/";
-
-        $arUploadImg = $this->getUploadImg($from);    // get upload files
-        foreach ($arUploadImg as $img) {
-            if (!$arYamlImg[$img]) {
+            if ($xmlId == '') {
                 continue;
             }
-            $to = $_SERVER['DOCUMENT_ROOT'] . $this->to . $arYamlImg[$img];
-            $this->moveImage($img, $from, $to);
+
+            $parentId = (string)$category->attributes()['parentId'];
+
+            $this->inputSections[$xmlId] = [
+                'xmlId' => $xmlId,
+                'name' => $this->formatString((string)$category),
+                'parentId' => $parentId,
+                'path' => '',
+            ];
+        }
+
+        foreach ($this->inputSections as $xmlId => &$arSection) {
+            $parentId = $xmlId;
+            do {
+                if (strlen($arSection['path'])) {
+                    $arSection['path'] = $this->sectionSeparator . $arSection['path'];
+                }
+                $arSection['path'] = trim($this->inputSections[$parentId]['name']) . $arSection['path'];
+                $parentId = $this->inputSections[$parentId]['parentId'];
+            } while ($parentId != '');
+
+            if (isset($inputSectionPaths[$arSection['path']])) {
+                $this->message($this->status('yml-раздел <b>' . $arSection['path'] . '</b> повторяется', 'error'));
+            } else {
+                $inputSectionPaths[$arSection['path']] = true;
+            }
+        }
+        unset($arSection);
+    }
+
+    protected function initOutputSections() {
+        $rsSections = CIBlockSection::GetList(['LEFT_MARGIN' => 'ASC'], ['IBLOCK_ID' => $this->iblock['id']], false, ['ID', 'IBLOCK_SECTION_ID', 'NAME']);
+
+        $arSections = [];
+        while ($arSection = $rsSections->Fetch()) {
+            $id = $arSection['ID'];
+            $arSections[$id] = $arSection;
+
+            $parentId = $id;
+            do {
+                if ($arSections[$id]['path']) {
+                    $arSections[$id]['path'] = $this->sectionSeparator . $arSections[$id]['path'];
+                }
+                $arSections[$id]['path'] = trim($arSections[$parentId]['NAME']) . $arSections[$id]['path'];
+            } while ($parentId = $arSections[$parentId]['IBLOCK_SECTION_ID']);
+        }
+
+        $this->outputSections = [
+            '' => false,
+        ];
+
+        foreach($arSections as $key => $arSection) {
+            if (isset($this->outputSections[$arSection['path']])) {
+                $this->message($this->status('Раздел каталога <b>' . $arSection['path'] . '</b> повторяется', 'error'));
+            }
+            $this->outputSections[$arSection['path']] = $arSection['ID'];
+            unset($arSections[$key]);
         }
     }
 
-    public function getImg($img) {
-        $data = explode("/", $img);
-        $fileName = $data[7];
-        $dir = $data[5] . '/' . $data[6] . '/';
+    protected function printImportBegin() {
+        $string = '';
 
-        $file = $_SERVER['DOCUMENT_ROOT'] . $this->to . $dir . $fileName;
+        if ($this->mode == 'import') {
+            $string .= '<h1>Импорт</h1>';
+        } elseif ($this->mode == 'debug') {
+            $string .= '<h1>Отладка</h1>';
+        }
+        $string .= '<p>';
+        foreach ($this->publicVariableNames as $variableName => $validators) {
+            $string .= $variableName . ': "<b>' . $this->{$variableName} . '</b>"<br>';
+        }
+        $string .= '</p>';
+        $string .= '<p>';
+        $string .= '?mode=import для импорта в инфоблок ' . $this->iblock['name'] . ' (' . $this->iblock['id'] . ') [' . $this->iblock['type'] . ']<br>';
+        $string .= '?mode=debug для включения режима отладки<br>';
+        $string .= '?action=generate-mapping-file для создания заглушки карты привязки разделов<br>';
+        $string .= '?action=delete-products-and-discounts для удаления созданных товаров и скидок<br>';
+        $string .= '?disable_soft_delete=1 для выключения режима деактивации несуществующих товаров в yml-файле. Элементы будут удаляться (также будут удаляться скидки)<br>';
+        $string .= '?exception_on_debug=1 для вывода исключения при включенном режиме отладки';
+        $string .= '</p>';
 
-        $image = (file_exists($file) && true ? CFile::MakeFileArray($file) : CFile::MakeFileArray($img));
-
-        return $image ?: false;
+        $this->message($string, false);
     }
 
-    public function getRelation() {
-        $arItems = [];
-        $hlBlockId = 1;
+    protected function printSectionBegin($arSection) {
+        $string = 'yml-раздел <b>' . $arSection['inputPath'] . '</b> <small>[yml-id:' . $arSection['xmlId'] . ']</small>';
+        if ($arSection['outputPath'] !== null) {
+            $string .= ' привязан к <b>' . $arSection['outputPath'] . '</b> <small>[id:' . $arSection['outputId'] . ']</small>';
+        } else {
+            $string .= ' не привязан в разделу';
+        }
+        $string .= ', содержит yml-товаров: <b>' . count($arSection['items']) . '</b></small>';
 
-        if (CModule::IncludeModule('highloadblock')) {
-            $arHLBlock = Bitrix\Highloadblock\HighloadBlockTable::getById($hlBlockId)->fetch();
-            $obEntity = Bitrix\Highloadblock\HighloadBlockTable::compileEntity($arHLBlock);
-            $strEntityDataClass = $obEntity->getDataClass();
+        if ($arSection['outputPath'] === null) {
+            $string = $this->status('<small>' . $string . '</small>', 'DarkKhaki');
+        } elseif (empty($arSection['items'])) {
+            $string = $this->status('<small>' . $string . '</small>', 'grey');
+        }
 
-            echo '<pre>';
-//            var_dump($arHLBlock);
-//            var_dump($obEntity);
-//            var_dump($strEntityDataClass);
+        $this->message($string, false);
+    }
 
-            $rsData = $strEntityDataClass::getList([
-                'select' => ['UF_YAML_CATALOG_ID', 'UF_YAML_CATALOG_NAME', 'UF_BX_CATALOG_ID', 'UF_CATALOG'],
-                'order'  => ['UF_BX_CATALOG_ID' => 'ASC'],
-                'filter' => ['UF_ACTIVE' => '1'],
-            ]);
-            while ($arItem = $rsData->Fetch()) {
-                $arItems[$arItem['UF_YAML_CATALOG_ID']] = $arItem['UF_BX_CATALOG_ID'];
-//                $arItems[$arItem['UF_YAML_CATALOG_ID']] = $arItem;
+    protected function printSectionEnd($arSection) {
+        if (!empty($arSection['items'])) {
+            $this->message('', false);
+        }
+    }
+
+    protected function printElement($arSection, $arFields, $arElement) {
+        $string = '';
+        foreach ($this->elementStatus as $status) {
+            if (strlen($string)) {
+                $string .= ', ';
             }
 
-//            var_dump($arItems);
-
-            echo '</pre>';
+            $string .= $this->status($status['text'], $status['status']);
         }
 
-        return $arItems;
+        $string = $arElement['name'] . ' [yml-id:' . $arElement['xmlId'] . ',внешний код:' . $arFields['XML_ID'] . ']' . (strlen($string) ? (': ' . $string) : '');
+        $string = preg_replace('#(\[[^\]]+\])#', '<small>$1</small>', $string);
+        $this->message($string, false);
     }
 
-    public function getYmlCategories($xmlObj) {
-        $arParents = array_keys($this->relationArray);
-        foreach ($xmlObj->shop->categories->category as $category) {
-            if (in_array($category['parentId'], $arParents)) {
-                if (!in_array($category['id'], $arParents)) {
-                    $arParents[] = (int)$category['id'];
+    protected function getElementsGroupedBySections() {
+        foreach ($this->xmlObj->shop->offers->offer as $offer) {
+            $xmlId = (string)$offer->attributes()['id'];
+
+            if ($xmlId == '') {
+                continue;
+            }
+
+            $parsedUrl = parse_url($this->formatString($offer->url));
+            $commonPart = $this->unparseUrlWoQueryAndFragment($parsedUrl);
+
+            $arCommonParts[$commonPart][$xmlId] = $offer;
+        }
+
+        $arSections = [
+            '' => [
+                'xmlId' => '<i>пусто</i>',
+                'inputPath' => '<i>Без раздела</i>',
+                'outputPath' => '<i>Без раздела</i>',
+                'outputId' => '<i>пусто</i>',
+                'items' => [],
+            ]
+        ];
+
+        foreach ($this->inputSections as $arSection) {
+            $arSections[$arSection['xmlId']] = [
+                'xmlId' => $arSection['xmlId'],
+                'inputPath' => $arSection['path'],
+                'outputPath' => null,
+                'outputId' => null,
+                'items' => [],
+            ];
+        }
+
+        foreach($arCommonParts as $commonPart => $offers) {
+            $minPrice = null;
+            $minOfferId = null;
+            $properties = [];
+
+            foreach ($offers as $offerId => $offer) {
+                $price = (double)$offer->price;
+
+                if ($minPrice === null || $minPrice > $price) {
+                    $minPrice = $price;
+                    $minOfferId = $offerId;
+                }
+
+                foreach($offer->param as $param) {
+                    $name = (string)$param->attributes()['name'];
+                    $key = null;
+                    if ($name == 'Ширина') {
+                        $key = 'width';
+                    } elseif ($name == 'Глубина') {
+                        $key = 'depth';
+                    } elseif ($name == 'Высота') {
+                        $key = 'height';
+                    } else {
+                        $this->message($this->status('Обнаружен &lt;param&gt; с атрибутом name равным "<b>' . $name . '</b>"', 'error'));
+                    }
+
+                    if ($key !== null) {
+                        $values = explode('/', (string)$param);
+                        foreach ($values as $value) {
+                            $properties[$key][] = $value;
+                        }
+                    }
                 }
             }
+
+            foreach ($properties as $name => $values) {
+                $properties[$name] = array_unique($values);
+            }
+
+            $offer = $offers[$minOfferId];
+            $xmlId = (string)$offer->attributes()['id'];
+            $sectionXmlId = (string)$offer->categoryId;
+            $filePath = str_replace('[id]', $xmlId, $this->picturesFilePath);
+
+            $arSections[$sectionXmlId]['items'][$xmlId] = [
+                'xmlId' => $xmlId,
+                'name' => $this->formatString($offer->name),
+                'finalPrice' => (double)$offer->price,
+                'originalPrice' => isset($offer->oldprice) ? (double)$offer->oldprice : (double)$offer->price,
+                'showPriceFrom' => count($offers) > 1,
+                'currency' => (string)$offer->currencyId,
+                'sectionId' => $sectionXmlId,
+                'properties' => $properties,
+                'picturePath' => file_exists($filePath) ? $filePath : null,
+                'description' => $this->formatString($offer->description),
+                'offersCount' => count($offers),
+            ];
         }
 
-        return $arParents;
+        foreach ($arSections as &$arSection) {
+            $haveItems = !empty($arSection['items']);
+
+            if ($haveItems || isset($this->sectionsMapping[$arSection['inputPath']])) {
+                $arSection['outputPath'] = $this->sectionsMapping[$arSection['inputPath']] === '' ? $arSections['']['outputPath'] : $this->sectionsMapping[$arSection['inputPath']];
+                $arSection['outputId'] = $this->sectionsMapping[$arSection['inputPath']] === '' ? $arSections['']['outputId'] : $this->getMappingSection($arSection['inputPath']);
+            }
+        }
+        unset($arSection);
+
+        return $arSections;
+    }
+
+    protected function writeElement($arFields) {
+        $el = new CIBlockElement;
+
+        if (isset($this->existingElements[$arFields['XML_ID']])) {
+            $elementId = $this->existingElements[$arFields['XML_ID']]['id'];
+
+            if ($el->Update($elementId, $arFields, false, true, true)) {
+                $this->elementStatus[] = ['status' => 'success', 'text' => 'элемент обновлен [id:' . $elementId . ']'];
+                return $elementId;
+            } else {
+                $this->elementStatus[] = ['status' => 'error', 'text' => 'ошибка обновления элемента [id:' . $elementId . ']: ' . $el->LAST_ERROR];
+                return false;
+            }
+        } else {
+            $mixed = $el->Add($arFields, false, true, true);
+
+            if ($mixed !== false) {
+                $elementId = $mixed;
+                $this->elementStatus[] = ['status' => 'success', 'text' => 'элемент создан [id:' . $elementId . ']'];
+                return $elementId;
+            } else {
+                $this->elementStatus[] = ['status' => 'error', 'text' => 'ошибка создания: ' . $el->LAST_ERROR];
+                return false;
+            }
+        }
+    }
+
+    protected function writeProduct($elementId, $xmlId, $arElement) {
+        $arProductFields = [
+            'TYPE' => Bitrix\Catalog\ProductTable::TYPE_PRODUCT,
+        ];
+
+        if (isset($this->existingProducts[$xmlId])) {
+            $this->elementStatus[] = ['status' => 'no action', 'text' => 'уже помечен как товар'];
+            return true;
+        } else {
+            $arProductFields['ID'] = $elementId;
+            if (CCatalogProduct::Add($arProductFields, false)) {
+                $this->elementStatus[] = ['status' => 'success', 'text' => 'помечен как товар'];
+                return true;
+            } else {
+                $this->elementStatus[] = ['status' => 'error', 'text' => 'ошибка помечивания как товара: ' . $GLOBALS['APPLICATION']->GetException()->GetString()];
+                return false;
+            }
+        }
+    }
+
+    protected function writePrice($productId, $xmlId, $arElement) {
+        $arPriceFields = [
+            'PRODUCT_ID' => $productId,
+            'CATALOG_GROUP_ID' => $this->catalogGroupBase,
+            'PRICE' => $arElement['originalPrice'] == $arElement['finalPrice'] ? $arElement['finalPrice'] : $arElement['originalPrice'],
+            'CURRENCY' => $this->getCurrency($productId, $arElement['currency']),
+            'QUANTITY_FROM' => false,
+            'QUANTITY_TO' => false,
+        ];
+
+        if (isset($this->existingPrices[$xmlId])) {
+            $priceId = $this->existingPrices[$xmlId];
+
+            if (CPrice::Update($priceId, $arPriceFields)) {
+                $this->elementStatus[] = ['status' => 'success', 'text' => 'цена обновлена [id:' . $priceId . ']'];
+                return $priceId;
+            } else {
+                $this->elementStatus[] = ['status' => 'error', 'text' => 'ошибка обновления цены [id:' . $priceId . ']: ' . $GLOBALS['APPLICATION']->GetException()->GetString()];
+                return false;
+            }
+        } else {
+            $mixed = CPrice::Add($arPriceFields);
+
+            if ($mixed !== false) {
+                $priceId = $mixed;
+                $this->elementStatus[] = ['status' => 'success', 'text' => 'цена создана [id:' . $priceId . ']'];
+                return $priceId;
+            } else {
+                $this->elementStatus[] = ['status' => 'error', 'text' => 'ошибка создания цены: ' . $GLOBALS['APPLICATION']->GetException()->GetString()];
+                return false;
+            }
+        }
+    }
+
+    protected function checkDiscount($productId, $xmlId, $arElement) {
+        $arDiscount = $this->existingDiscounts[$xmlId];
+
+        if ($arElement['finalPrice'] == $arElement['originalPrice']) {
+            if (isset($arDiscount)) {
+                if (CSaleDiscount::Delete($arDiscount['ID'])) {
+                    $this->elementStatus[] = ['status' => 'success', 'text' => 'скидка удалена [id:' . $arDiscount['ID'] . ']'];
+                    return 'deleted';
+                } else {
+                    $this->elementStatus[] = ['status' => 'error', 'text' => 'ошибка удаления скидки [id:' . $arDiscount['ID'] . ']'];
+                    return 'could not delete';
+                }
+            } else {
+                return;
+            }
+        } else {
+            $discountValue = $arElement['originalPrice'] - $arElement['finalPrice'];
+
+            $arConditions = [
+                'CLASS_ID' => 'CondGroup',
+                'DATA' => [
+                    'All' => 'AND',
+                    'True' => 'True',
+                ],
+                'CHILDREN' => [
+                    [
+                        'CLASS_ID' => 'CondBsktProductGroup',
+                        'DATA' => [
+                            'Found' => 'Found',
+                            'All' => 'OR',
+                        ],
+                        'CHILDREN' => [
+                            [
+                                'CLASS_ID' => 'CondIBElement',
+                                'DATA' => [
+                                    'logic' => 'Equal',
+                                    'value' => [
+                                        1 => $productId,
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ];
+
+            $arActions = [
+                'CLASS_ID' => 'CondGroup',
+                'DATA' => [
+                    'All' => 'AND',
+                ],
+                'CHILDREN' => [
+                    [
+                        'CLASS_ID' => 'ActSaleBsktGrp',
+                        'DATA' => [
+                            'Type' => 'Discount',
+                            'Value' => $discountValue,
+                            'Unit' => 'CurEach',
+                            'Max' => 0,
+                            'All' => 'OR',
+                            'True' => 'True',
+                        ],
+                        'CHILDREN' => [
+                            [
+                                'CLASS_ID' => 'CondIBElement',
+                                'DATA' => [
+                                    'logic' => 'Equal',
+                                    'value' => [
+                                        1 => $productId,
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ];
+
+            $presetId = Sale\Handlers\DiscountPreset\SimpleProduct::class;
+
+            if (isset($arDiscount)) {
+                $discountId = $arDiscount['ID'];
+                unset($arDiscount['ID']);
+                $arDiscount['ACTIVE'] = 'Y';
+                $arDiscount['DISCOUNT_VALUE'] = $discountValue;
+                $arDiscount['DISCOUNT_TYPE'] = CSaleDiscount::OLD_DSC_TYPE_FIX;
+                $arDiscount['PRESET_ID'] = $presetId;
+                $arDiscount['CONDITIONS'] = $arConditions;
+                $arDiscount['ACTIONS'] = $arActions;
+
+                if ($discountId = CSaleDiscount::Update($discountId, $arDiscount)) {
+                    $this->elementStatus[] = ['status' => 'success', 'text' => 'скидка обновлена [id:' . $discountId . ']'];
+                    return $discountId;
+                } else {
+                    $exceptionMessage = $GLOBALS['APPLICATION']->GetException() !== false ? $GLOBALS['APPLICATION']->GetException()->GetString() : '<i>без описания</i>';
+                    $this->elementStatus[] = ['status' => 'error', 'text' => 'ошибка обновления скидки [id:' . $discountId . ']: ' . $exceptionMessage];
+                    return false;
+                }
+            } else {
+                $arDiscount = [
+                    'LID' => SITE_ID,
+                    'XML_ID' => '',
+                    'NAME' => $this->getDiscountName($productId, $xmlId, $arElement['name']),
+                    'CURRENCY' => $this->getCurrency($productId, $arElement['currency']),
+                    'DISCOUNT_VALUE' => $discountValue,
+                    'DISCOUNT_TYPE' => CSaleDiscount::OLD_DSC_TYPE_FIX,
+                    'ACTIVE' => 'Y',
+                    'PRIORITY' => 1,
+                    'LAST_DISCOUNT' => 'Y',
+                    'LAST_LEVEL_DISCOUNT' => 'N',
+                    'CONDITIONS' => $arConditions,
+                    'ACTIONS' => $arActions,
+                    'USER_GROUPS' => $this->allUsersGroup,
+                    'PRESET_ID' => $presetId,
+                ];
+
+                $mixed = CSaleDiscount::Add($arDiscount);
+
+                if ($mixed !== false) {
+                    $discountId = $mixed;
+                    $this->elementStatus[] = ['status' => 'success', 'text' => 'скидка создана [id:' . $discountId . ']'];
+                    return $discountId;
+                } else {
+                    $exceptionMessage = $GLOBALS['APPLICATION']->GetException() !== false ? $GLOBALS['APPLICATION']->GetException()->GetString() : '<i>без описания</i>';
+                    $this->elementStatus[] = ['status' => 'error', 'text' => 'ошибка создания скидки: ' . $exceptionMessage];
+                    return false;
+                }
+            }
+
+        }
     }
 }

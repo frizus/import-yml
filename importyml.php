@@ -1,10 +1,10 @@
 <?
-define("STOP_STATISTICS", true);
+define('STOP_STATISTICS', true);
 define('NO_AGENT_CHECK', true);
 define('DisableEventsCheck', true);
 define('BX_SECURITY_SHOW_MESSAGE', true);
-define("PUBLIC_AJAX_MODE", true);
-require($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/include/prolog_before.php");
+define('PUBLIC_AJAX_MODE', true);
+require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.php');
 
 if (!$GLOBALS['USER']->IsAdmin()) {
     LocalRedirect(SITE_DIR, true);
@@ -18,7 +18,7 @@ if (!CModule::IncludeModule('iblock') || !CModule::IncludeModule('catalog') || !
     throw new Exception('Не удалось подключить необходимые модули Битрикса');
     return;
 }
-require ($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/sale/handlers/discountpreset/simpleproduct.php");
+require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/sale/handlers/discountpreset/simpleproduct.php');
 
 $importYml = new ImportYml([
     'iblockCode' => 'test',
@@ -36,7 +36,8 @@ $importYml = new ImportYml([
 
 $importYml->run();
 
-class ImportYml {
+class ImportYml
+{
     protected $iblockCode;
 
     protected $allUsersGroupName = 'Все пользователи (в том числе неавторизованные)';
@@ -113,7 +114,8 @@ class ImportYml {
         'action' => ['toAction'],
     ];
 
-    public function __construct($values) {
+    public function __construct($values)
+    {
         $publicVariableNamesForValidation = $this->publicVariableNames;
 
         foreach ($values as $key => $value) {
@@ -126,21 +128,24 @@ class ImportYml {
         }
     }
 
-    public function run() {
-        Bitrix\Main\Diag\Debug::startTimeLabel("run");
+    public function run()
+    {
+        Bitrix\Main\Diag\Debug::startTimeLabel('run');
 
         $this->runAction();
 
-        Bitrix\Main\Diag\Debug::endTimeLabel("run");
+        Bitrix\Main\Diag\Debug::endTimeLabel('run');
 
         $this->message('Выполнение заняло: ' . Bitrix\Main\Diag\Debug::getTimeLabels()['run']['time'] . ' сек.', false);
     }
 
-    protected function runAction() {
+    protected function runAction()
+    {
         call_user_func([$this, $this->getNormalizedAction()]);
     }
 
-    protected function getNormalizedAction() {
+    protected function getNormalizedAction()
+    {
         $action = str_replace(['-', '_', ' '], '', $this->action) . 'Action';
 
         if (!method_exists($this, $action)) {
@@ -150,34 +155,40 @@ class ImportYml {
         return $action;
     }
 
-    protected function notEmpty($variableName) {
+    protected function notEmpty($variableName)
+    {
         if (!strlen(trim((string)$this->{$variableName}))) {
             $this->message($this->status('Значение ' . $variableName . ' не должно быть пустым', 'error'), true);
         }
     }
 
-    protected function toBool($variableName) {
+    protected function toBool($variableName)
+    {
         $this->{$variableName} = (bool)$this->{$variableName};
     }
 
-    protected function toMode($variableName) {
+    protected function toMode($variableName)
+    {
         $this->{$variableName} = $this->{$variableName} == 'import' ? 'import' : 'debug';
     }
 
-    protected function toAction($variableName) {
+    protected function toAction($variableName)
+    {
         if (!strlen(trim((string)$this->{$variableName}))) {
             $this->{$variableName} = self::DEFAULT_ACTION;
         }
     }
 
-    protected function setValue($variableName, $value) {
+    protected function setValue($variableName, $value)
+    {
         if (array_key_exists($variableName, $this->publicVariableNames)) {
             $this->{$variableName} = $value;
             $this->validateField($variableName);
         }
     }
 
-    protected function validateField($variableName) {
+    protected function validateField($variableName)
+    {
         if (array_key_exists($variableName, $this->publicVariableNames)) {
             $validators = $this->publicVariableNames[$variableName];
 
@@ -189,7 +200,8 @@ class ImportYml {
         }
     }
 
-    protected function importItemsAction() {
+    protected function importItemsAction()
+    {
         $this->initIBlocks();
 
         $this->printImportBegin();
@@ -248,7 +260,7 @@ class ImportYml {
                     'IBLOCK_SECTION_ID' => $this->getMappingSection($this->inputSections[$arElement['sectionId']]['path']),
                     'IBLOCK_ID' => $this->iblock['id'],
                     'XML_ID' => $this->getXmlId($arElement['xmlId']),
-                    'CODE' => CUtil::translit($this->translitPrefix . $arElement['xmlId'], 'ru', ['replace_space' => '-', "replace_other" => '-']),
+                    'CODE' => CUtil::translit($this->translitPrefix . $arElement['xmlId'], 'ru', ['replace_space' => '-', 'replace_other' => '-']),
                     'DETAIL_TEXT' => $arElement['description'],
                     'DETAIL_PICTURE' => $arElement['picturePath'] !== null ? CFile::MakeFileArray($arElement['picturePath']) : null,
                     'PROPERTY_VALUES' => [],
@@ -256,11 +268,11 @@ class ImportYml {
 
                 $propertyValues = [];
 
-                foreach($arElement['properties'] as $name => $values) {
+                foreach ($arElement['properties'] as $name => $values) {
                     $i = 0;
                     $propName = 'ATTR_' . strtoupper($name);
 
-                    foreach($values as $value) {
+                    foreach ($values as $value) {
                         $propertyValues[$propName]['n' . $i] = ['VALUE' => $value];
                         $i++;
                     }
@@ -296,7 +308,8 @@ class ImportYml {
         $this->totals();
     }
 
-    protected function generateMappingFileAction() {
+    protected function generateMappingFileAction()
+    {
         clearstatcache();
         if (file_exists($this->mappingFilePath) && filesize($this->mappingFilePath)) {
             $this->message($this->status('Файл <b>' . $this->mappingFilePath . '</b> не пустой', 'error'), false);
@@ -332,7 +345,8 @@ class ImportYml {
         }
     }
 
-    protected function deleteProductsAndDiscountsAction() {
+    protected function deleteProductsAndDiscountsAction()
+    {
         $this->initIBlocks();
 
         $discountNames = [];
@@ -381,7 +395,8 @@ class ImportYml {
         $this->totals();
     }
 
-    protected function initYmlFile() {
+    protected function initYmlFile()
+    {
         $this->xmlObj = simplexml_load_file($this->ymlFilePath);
 
         if ($this->xmlObj === false) {
@@ -389,7 +404,8 @@ class ImportYml {
         }
     }
 
-    protected function message($message, $isException = null) {
+    protected function message($message, $isException = null)
+    {
         if (!is_bool($isException)) {
             if (
                 (($this->mode == 'debug') && $this->exceptionOnDebug)
@@ -402,13 +418,14 @@ class ImportYml {
         }
 
         if ($isException === true) {
-            throw new Exception(strip_tags($message));
+            throw new Exception(html_entity_decode(strip_tags($message)));
         } elseif ($isException === false) {
             echo $message . '<br>';
         }
     }
 
-    protected function totals() {
+    protected function totals()
+    {
         $string = '<br>';
 
         foreach ($this->count as $key => $value) {
@@ -420,15 +437,18 @@ class ImportYml {
         $this->message($string, false);
     }
 
-    protected function getDiscountName($productId, $xmlId, $productName) {
+    protected function getDiscountName($productId, $xmlId, $productName)
+    {
         return $this->discountPrefix . $productName . ' [id:' . $productId . ',внешний код:' . $xmlId . ']';
     }
 
-    protected function getXmlId($xmlId) {
+    protected function getXmlId($xmlId)
+    {
         return $this->elementPrefix . $xmlId;
     }
 
-    protected function getCurrency($productId, $currency) {
+    protected function getCurrency($productId, $currency)
+    {
         if ($currency != 'RUB') {
             $this->message($this->status('Валюта <small>[id:' . $productId . ']</small>: ' . $currency, 'error'));
         }
@@ -436,23 +456,26 @@ class ImportYml {
         return 'RUB';
     }
 
-    protected function unparseUrlWoQueryAndFragment($parsedUrl) {
+    protected function unparseUrlWoQueryAndFragment($parsedUrl)
+    {
         $scheme = isset($parsedUrl['scheme']) ? $parsedUrl['scheme'] . '://' : '';
         $host = isset($parsedUrl['host']) ? $parsedUrl['host'] : '';
         $port = isset($parsedUrl['port']) ? ':' . $parsedUrl['port'] : '';
         $user = isset($parsedUrl['user']) ? $parsedUrl['user'] : '';
-        $pass = isset($parsedUrl['pass']) ? ':' . $parsedUrl['pass']  : '';
+        $pass = isset($parsedUrl['pass']) ? ':' . $parsedUrl['pass'] : '';
         $pass = ($user || $pass) ? "$pass@" : '';
         $path = isset($parsedUrl['path']) ? $parsedUrl['path'] : '';
 
         return "$scheme$user$pass$host$port$path";
     }
 
-    protected function formatString($string) {
+    protected function formatString($string)
+    {
         return trim(str_replace(['&quot;', '&amp;', '&gt;', '&lt;', '&apos;'], ['"', '&', '>', '<', "'"], $string));
     }
 
-    protected function status($text, $status) {
+    protected function status($text, $status)
+    {
         if ($status == 'success') {
             $color = 'green';
         } elseif ($status == 'no action') {
@@ -466,13 +489,14 @@ class ImportYml {
         return '<font color="' . $color . '">' . $text . '</font>';
     }
 
-    protected function parseSectionsMappingFile() {
+    protected function parseSectionsMappingFile()
+    {
         if (empty($this->outputSections)) {
             $this->message($this->status('Привязка разделов: в инфоблоке ' . $this->iblock['name'] . ' (' . $this->iblock['id'] . ') [' . $this->iblock['type'] . '] нет разделов', 'no action'), false);
             return;
         }
 
-        $handle = fopen($this->mappingFilePath, "r");
+        $handle = fopen($this->mappingFilePath, 'r');
         if ($handle) {
             $lineNumber = 1;
             while (($line = fgets($handle)) !== false) {
@@ -506,7 +530,8 @@ class ImportYml {
         }
     }
 
-    protected function getMappingSection($path) {
+    protected function getMappingSection($path)
+    {
         if ($path === null) {
             return;
         }
@@ -522,7 +547,8 @@ class ImportYml {
         $this->message($this->status('Не удалось определить привязанный раздел yml-раздела <b>' . $path . '</b>', 'error'));
     }
 
-    protected function initExistingProducts() {
+    protected function initExistingProducts()
+    {
         $rsGroups = CGroup::GetList(($by = 'c_sort'), ($order = 'desc'), ['NAME' => $this->allUsersGroupName]);
         if ($arGroup = $rsGroups->Fetch()) {
             $this->allUsersGroup = [$arGroup['ID']];
@@ -601,7 +627,8 @@ class ImportYml {
         }
     }
 
-    protected function deleteNotExistingYmlProducts() {
+    protected function deleteNotExistingYmlProducts()
+    {
         $haveElementsNotInYmlExist = false;
         $discountNames = [];
 
@@ -664,7 +691,8 @@ class ImportYml {
         }
     }
 
-    protected function initIBlocks() {
+    protected function initIBlocks()
+    {
         if (!strlen(trim($this->iblockCode))) {
             $this->message($this->status('Код инфоблока пустой', 'error'), true);
         }
@@ -684,7 +712,8 @@ class ImportYml {
         }
     }
 
-    protected function initInputSections() {
+    protected function initInputSections()
+    {
         foreach ($this->xmlObj->shop->categories->category as $category) {
             $xmlId = (string)$category->attributes()['id'];
 
@@ -721,7 +750,8 @@ class ImportYml {
         unset($arSection);
     }
 
-    protected function initOutputSections() {
+    protected function initOutputSections()
+    {
         $rsSections = CIBlockSection::GetList(['LEFT_MARGIN' => 'ASC'], ['IBLOCK_ID' => $this->iblock['id']], false, ['ID', 'IBLOCK_SECTION_ID', 'NAME']);
 
         $arSections = [];
@@ -742,7 +772,7 @@ class ImportYml {
             '' => false,
         ];
 
-        foreach($arSections as $key => $arSection) {
+        foreach ($arSections as $key => $arSection) {
             if (isset($this->outputSections[$arSection['path']])) {
                 $this->message($this->status('Раздел каталога <b>' . $arSection['path'] . '</b> повторяется', 'error'));
             }
@@ -751,7 +781,8 @@ class ImportYml {
         }
     }
 
-    protected function printImportBegin() {
+    protected function printImportBegin()
+    {
         $string = '';
 
         if ($this->mode == 'import') {
@@ -776,7 +807,8 @@ class ImportYml {
         $this->message($string, false);
     }
 
-    protected function printSectionBegin($arSection) {
+    protected function printSectionBegin($arSection)
+    {
         $string = 'yml-раздел <b>' . $arSection['inputPath'] . '</b> <small>[yml-id:' . $arSection['xmlId'] . ']</small>';
         if ($arSection['outputPath'] !== null) {
             $string .= ' привязан к <b>' . $arSection['outputPath'] . '</b> <small>[id:' . $arSection['outputId'] . ']</small>';
@@ -794,13 +826,15 @@ class ImportYml {
         $this->message($string, false);
     }
 
-    protected function printSectionEnd($arSection) {
+    protected function printSectionEnd($arSection)
+    {
         if (!empty($arSection['items'])) {
             $this->message('', false);
         }
     }
 
-    protected function printElement($arSection, $arFields, $arElement) {
+    protected function printElement($arSection, $arFields, $arElement)
+    {
         $string = '';
         foreach ($this->elementStatus as $status) {
             if (strlen($string)) {
@@ -815,7 +849,8 @@ class ImportYml {
         $this->message($string, false);
     }
 
-    protected function getElementsGroupedBySections() {
+    protected function getElementsGroupedBySections()
+    {
         foreach ($this->xmlObj->shop->offers->offer as $offer) {
             $xmlId = (string)$offer->attributes()['id'];
 
@@ -849,7 +884,7 @@ class ImportYml {
             ];
         }
 
-        foreach($arCommonParts as $commonPart => $offers) {
+        foreach ($arCommonParts as $commonPart => $offers) {
             $minPrice = null;
             $minOfferId = null;
             $properties = [];
@@ -862,7 +897,7 @@ class ImportYml {
                     $minOfferId = $offerId;
                 }
 
-                foreach($offer->param as $param) {
+                foreach ($offer->param as $param) {
                     $name = (string)$param->attributes()['name'];
                     $key = null;
                     if ($name == 'Ширина') {
@@ -921,7 +956,8 @@ class ImportYml {
         return $arSections;
     }
 
-    protected function writeElement($arFields) {
+    protected function writeElement($arFields)
+    {
         $el = new CIBlockElement;
 
         if (isset($this->existingElements[$arFields['XML_ID']])) {
@@ -948,7 +984,8 @@ class ImportYml {
         }
     }
 
-    protected function writeProduct($elementId, $xmlId, $arElement) {
+    protected function writeProduct($elementId, $xmlId, $arElement)
+    {
         $arProductFields = [
             'TYPE' => Bitrix\Catalog\ProductTable::TYPE_PRODUCT,
         ];
@@ -968,7 +1005,8 @@ class ImportYml {
         }
     }
 
-    protected function writePrice($productId, $xmlId, $arElement) {
+    protected function writePrice($productId, $xmlId, $arElement)
+    {
         $arPriceFields = [
             'PRODUCT_ID' => $productId,
             'CATALOG_GROUP_ID' => $this->catalogGroupBase,
@@ -1002,7 +1040,8 @@ class ImportYml {
         }
     }
 
-    protected function checkDiscount($productId, $xmlId, $arElement) {
+    protected function checkDiscount($productId, $xmlId, $arElement)
+    {
         $arDiscount = $this->existingDiscounts[$xmlId];
 
         if ($arElement['finalPrice'] == $arElement['originalPrice']) {

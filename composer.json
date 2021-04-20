@@ -1,0 +1,29 @@
+{
+    "name": "frizus/importyml",
+    "description": "Import .yml file into Bitrix",
+    "type": "library",
+    "license": "MIT",
+    "verison": "0.9.0",
+    "authors": [
+        {
+            "name": "zukra",
+            "email": "jelita.1331@gmail.com"
+        },
+        {
+            "name": "Frizus",
+            "email": "irfzus@gmail.com"
+        }
+    ],
+    "minimum-stability": "dev",
+    "require": {},
+    "autoload": {
+        "psr-4": {
+            "Frizus\\ImportYml\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Frizus\\ImportYml\\": "src/"
+        }
+    }
+}

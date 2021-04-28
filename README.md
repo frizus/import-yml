@@ -15,7 +15,7 @@ composer require frizus/importyml
 
 ## Описание
 
-Скрипт importyml.php поддерживает импорт UTF-8 yml-файла со структурой вида:
+Скрипт поддерживает импорт UTF-8 yml-файла со структурой вида:
 ```xml
 <?xml version="1.0"?><!DOCTYPE yml_catalog SYSTEM "shops.dtd">
 <yml_catalog date="2021-04-13 14:15">

@@ -331,27 +331,32 @@ class Main
                 }
 
                 if ($this->mode == 'debug') {
-                    $haveDiscount = false;
                     if (isset($this->existingElements[$xmlId])) {
                         $this->elementStatus[] = ['status' => 'no action', 'text' => 'есть элемент'];
-                        if (isset($this->existingProducts[$xmlId])) {
-                            $this->elementStatus[] = ['status' => 'no action', 'text' => 'помечен как товар'];
-                        }
-                        if (isset($this->existingPrices[$xmlId])) {
-                            $this->elementStatus[] = ['status' => 'no action', 'text' => 'есть цена'];
-                        }
-                        if (isset($this->existingDiscounts[$xmlId])) {
-                            $haveDiscount = true;
-                            $this->elementStatus[] = ['status' => 'no action', 'text' => 'есть скидка'];
-                            if ($arElement['finalPrice'] != $arElement['originalPrice']) {
-                                $this->elementStatus[] = ['status' => 'no action', 'text' => 'скидка обновится'];
-                            } else {
-                                $this->elementStatus[] = ['status' => 'no action', 'text' => 'скидка удалится'];
-                            }
-                        }
+                    } else {
+                        $this->elementStatus[] = ['status' => 'no action', 'text' => 'будет создан элемент'];
                     }
 
-                    if (!$haveDiscount) {
+                    if (isset($this->existingProducts[$xmlId])) {
+                        $this->elementStatus[] = ['status' => 'no action', 'text' => 'помечен как товар'];
+                    } else {
+                        $this->elementStatus[] = ['status' => 'no action', 'text' => 'будет помечен как товар'];
+                    }
+
+                    if (isset($this->existingPrices[$xmlId])) {
+                        $this->elementStatus[] = ['status' => 'no action', 'text' => 'есть цена'];
+                    } else {
+                        $this->elementStatus[] = ['status' => 'no action', 'text' => 'будет создана цена'];
+                    }
+
+                    if (isset($this->existingDiscounts[$xmlId])) {
+                        $this->elementStatus[] = ['status' => 'no action', 'text' => 'есть скидка'];
+                        if ($arElement['finalPrice'] != $arElement['originalPrice']) {
+                            $this->elementStatus[] = ['status' => 'no action', 'text' => 'скидка обновится'];
+                        } else {
+                            $this->elementStatus[] = ['status' => 'no action', 'text' => 'скидка удалится'];
+                        }
+                    } else {
                         if ($arElement['finalPrice'] != $arElement['originalPrice']) {
                             $this->elementStatus[] = ['status' => 'no action', 'text' => 'будет создана скидка'];
                         }
@@ -512,7 +517,7 @@ class Main
         $this->xmlObj = simplexml_load_file($this->ymlFilePath);
 
         if ($this->xmlObj === false) {
-            $this->message($this->message('Не удалось прочитать yml-файл: <b>' . $this->ymlFilePath . '</b>', 'error'), true);
+            $this->message($this->status('Не удалось прочитать yml-файл: <b>' . $this->ymlFilePath . '</b>', 'error'), true);
         }
     }
 
@@ -1168,7 +1173,7 @@ class Main
                 $this->elementStatus[] = ['status' => 'success', 'text' => 'элемент создан [id:' . $elementId . ']'];
                 return $elementId;
             } else {
-                $this->elementStatus[] = ['status' => 'error', 'text' => 'ошибка создания: ' . $el->LAST_ERROR];
+                $this->elementStatus[] = ['status' => 'error', 'text' => 'ошибка создания элемента: ' . $el->LAST_ERROR];
                 return false;
             }
         }

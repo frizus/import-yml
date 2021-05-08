@@ -1,0 +1,31 @@
+<?xml version="1.0"?><!DOCTYPE yml_catalog SYSTEM "shops.dtd">
+<yml_catalog date="2021-04-13 14:15">
+    <shop>
+        <name>Интернет-магазин Бренд X</name>
+        <company>Бренд X</company>
+        <url>http://example.com</url>
+        <platform>1C-Bitrix</platform>
+        <currencies>
+            <currency id="RUB" rate="1" />
+        </currencies>
+        <categories>
+            <category id="1">Категория 1</category>
+            <category id="2" parentId="1">Подкатегория 1</category>
+        </categories>
+        <offers>
+            <offer id="1" available="true">
+                <url>https://example.com/product-id1/</url>
+                <price>500</price>
+                <oldprice>600</oldprice>
+                <currencyId>RUB</currencyId>
+                <categoryId>1</categoryId>
+                <picture>http://example.com/images/5bwa35naw35n.jpg</picture>
+                <name>Товар</name>
+                <description>Описание товара</description>
+                <param name="Ширина">500</param>
+                <param name="Глубина">400</param>
+                <param name="Высота">300</param>
+            </offer>
+        </offers>
+    </shop>
+</yml_catalog>

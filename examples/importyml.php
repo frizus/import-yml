@@ -23,9 +23,9 @@ if (!$GLOBALS['USER']->IsAdmin()) {
 
 $importYml = new Main([
     'iblockCode' => 'test', // код инфоблока (или ID инфоблока), в который идет импорт (должен быть торговым каталогом)
-    'ymlFilePath' => $_SERVER['DOCUMENT_ROOT'] . '/local/ymlfile.xml', // абсолютный путь до импортируемого файла
-    'mappingFilePath' => $_SERVER['DOCUMENT_ROOT'] . '/local/section_mapping.txt', // абсолютный путь до файла привязки категорий
-    'picturesFilePath' => $_SERVER['DOCUMENT_ROOT'] . '/local/img/[id].jpg', // локальный абсолютный путь до импортируемых картинок вида <путь>/[id картинки].jpg
+    'ymlFilePath' => __DIR__ . '/ymlfile.xml', // абсолютный путь до импортируемого файла
+    'mappingFilePath' => __DIR__ . '/section_mapping.txt', // абсолютный путь до файла привязки категорий
+    'picturesFilePath' => __DIR__ . '/img/[id].jpg', // локальный абсолютный путь до импортируемых картинок вида <путь>/[id картинки].jpg
     'elementPrefix' => 'Бренд X-', // префикс внешнего кода импортируемых элементов инфоблока
     'discountPrefix' => 'Бренд X скидка: ', // префикс названия скидки импортируемых скидок на товары
     'translitPrefix' => 'brand-x-id-', // префикс символьного кода импортируемых элементов инфоблока
